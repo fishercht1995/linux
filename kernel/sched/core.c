@@ -6247,8 +6247,36 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		}
 		switch_count = &prev->nvcsw;
 	}
-
-	next = pick_next_task(rq, prev, &rf);
+	 /*
+         * Scheduling hook
+         */
+        struct sched_entity *sea;
+        sea = &prev->se;
+        u64 del;
+        del = sea->sum_exec_runtime - sea->prev_sum_exec_runtime;
+        //printk("schedule(); prev->pred: %d\n", prev->pred);
+        if(prev->pred){
+                printk("schedule(); prev->pred: %d\n", prev->pred);
+        }
+        int aret = 0;
+        int used_pred = prev->pred;
+        if(bpf_sched_enabled()){
+                aret = bpf_sched_cfs__schedule(prev, del,used_pred);
+        }
+        //      if(ret > 0){
+        //              next = prev;
+        //      }else{
+        //              next = pick_next_task(rq,prev, &rf);
+        //      }
+        //}else{
+        //      next = pick_next_task(rq, prev, &rf);
+        //}
+        if(sea->on_rq && aret > 0){
+                next = prev;
+        }else{
+                next = pick_next_task(rq, prev, &rf);
+        }
+	//next = pick_next_task(rq, prev, &rf);
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 #ifdef CONFIG_SCHED_DEBUG

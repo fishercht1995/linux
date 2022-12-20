@@ -124,6 +124,22 @@ bpf_sched_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_sched_entity_to_cgrpid_proto;
 	case BPF_FUNC_sched_entity_belongs_to_cgrp:
 		return &bpf_sched_entity_belongs_to_cgrp_proto;
+	case BPF_FUNC_map_lookup_elem:
+                return &bpf_map_lookup_elem_proto;
+        case BPF_FUNC_map_update_elem:
+                return &bpf_map_update_elem_proto;
+        case BPF_FUNC_map_delete_elem:
+                return &bpf_map_delete_elem_proto;
+        case BPF_FUNC_map_push_elem:
+                return &bpf_map_push_elem_proto;
+        case BPF_FUNC_map_pop_elem:
+                return &bpf_map_pop_elem_proto;
+        case BPF_FUNC_map_peek_elem:
+                return &bpf_map_peek_elem_proto;
+        case BPF_FUNC_ktime_get_ns:
+                return &bpf_ktime_get_ns_proto;
+        case BPF_FUNC_ktime_get_boot_ns:
+                return &bpf_ktime_get_boot_ns_proto;
 	default:
 		return NULL;
 	}
