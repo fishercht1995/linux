@@ -1860,7 +1860,73 @@ out_unmark:
 
 	return retval;
 }
+static int bprm_newexecve(struct linux_binprm *bprm, int pred,
+                       int fd, struct filename *filename, int flags)
+{
+        struct file *file;
+        int retval;
 
+        retval = prepare_bprm_creds(bprm);
+        if (retval)
+                return retval;
+
+        check_unsafe_exec(bprm);
+        current->in_execve = 1;
+        current->pred = pred;
+        printk("pred: %d\n",pred);
+        file = do_open_execat(fd, filename, flags);
+        retval = PTR_ERR(file);
+        if (IS_ERR(file))
+                goto out_unmark;
+
+        sched_exec();
+
+        bprm->file = file;
+        /*
+         * Record that a name derived from an O_CLOEXEC fd will be
+         * inaccessible after exec.  This allows the code in exec to
+         * choose to fail when the executable is not mmaped into the
+         * interpreter and an open file descriptor is not passed to
+         * the interpreter.  This makes for a better user experience
+         * than having the interpreter start and then immediately fail
+         * when it finds the executable is inaccessible.
+         */
+        if (bprm->fdpath && get_close_on_exec(fd))
+                bprm->interp_flags |= BINPRM_FLAGS_PATH_INACCESSIBLE;
+
+        /* Set the unchanging part of bprm->cred */
+        retval = security_bprm_creds_for_exec(bprm);
+        if (retval)
+                goto out;
+
+        retval = exec_binprm(bprm);
+        if (retval < 0)
+                goto out;
+
+        /* execve succeeded */
+        current->fs->in_exec = 0;
+        current->in_execve = 0;
+        rseq_execve(current);
+        acct_update_integrals(current);
+        task_numa_free(current, false);
+        return retval;
+
+out:
+        /*
+         * If past the point of no return ensure the code never
+         * returns to the userspace process.  Use an existing fatal
+         * signal if present otherwise terminate the process with
+         * SIGSEGV.
+         */
+        if (bprm->point_of_no_return && !fatal_signal_pending(current))
+                force_sigsegv(SIGSEGV);
+
+out_unmark:
+        current->fs->in_exec = 0;
+        current->in_execve = 0;
+
+        return retval;
+}
 static int do_execveat_common(int fd, struct filename *filename,
 			      struct user_arg_ptr argv,
 			      struct user_arg_ptr envp,
@@ -1929,6 +1995,74 @@ out_ret:
 	putname(filename);
 	return retval;
 }
+static int do_newexecveat_common(int fd, int pred, struct filename *filename,
+                              struct user_arg_ptr argv,
+                              struct user_arg_ptr envp,
+                              int flags)
+{
+        struct linux_binprm *bprm;
+        int retval;
+
+        if (IS_ERR(filename))
+                return PTR_ERR(filename);
+
+        /*
+         * We move the actual failure in case of RLIMIT_NPROC excess from
+         * set*uid() to execve() because too many poorly written programs
+         * don't check setuid() return code.  Here we additionally recheck
+         * whether NPROC limit is still exceeded.
+         */
+        if ((current->flags & PF_NPROC_EXCEEDED) &&
+            is_ucounts_overlimit(current_ucounts(), UCOUNT_RLIMIT_NPROC, rlimit(RLIMIT_NPROC))) {
+                retval = -EAGAIN;
+                goto out_ret;
+        }
+
+        /* We're below the limit (still or again), so we don't want to make
+         * further execve() calls fail. */
+        current->flags &= ~PF_NPROC_EXCEEDED;
+
+        bprm = alloc_bprm(fd, filename);
+        if (IS_ERR(bprm)) {
+                retval = PTR_ERR(bprm);
+                goto out_ret;
+        }
+
+        retval = count(argv, MAX_ARG_STRINGS);
+        if (retval < 0)
+                goto out_free;
+        bprm->argc = retval;
+
+        retval = count(envp, MAX_ARG_STRINGS);
+        if (retval < 0)
+                goto out_free;
+        bprm->envc = retval;
+
+        retval = bprm_stack_limits(bprm);
+        if (retval < 0)
+                goto out_free;
+
+        retval = copy_string_kernel(bprm->filename, bprm);
+        if (retval < 0)
+                goto out_free;
+        bprm->exec = bprm->p;
+
+        retval = copy_strings(bprm->envc, envp, bprm);
+        if (retval < 0)
+                goto out_free;
+
+        retval = copy_strings(bprm->argc, argv, bprm);
+        if (retval < 0)
+                goto out_free;
+
+        retval = bprm_newexecve(bprm, pred, fd, filename, flags);
+out_free:
+        free_bprm(bprm);
+
+out_ret:
+        putname(filename);
+        return retval;
+}
 
 int kernel_execve(const char *kernel_filename,
 		  const char *const *argv, const char *const *envp)
@@ -1990,6 +2124,15 @@ static int do_execve(struct filename *filename,
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
 	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
+}
+
+static int do_newexecve(struct filename *filename, int pred,
+        const char __user *const __user *__argv,
+        const char __user *const __user *__envp)
+{
+        struct user_arg_ptr argv = { .ptr.native = __argv };
+        struct user_arg_ptr envp = { .ptr.native = __envp };
+        return do_newexecveat_common(AT_FDCWD, pred, filename, argv, envp, 0);
 }
 
 static int do_execveat(int fd, struct filename *filename,
@@ -2086,7 +2229,14 @@ COMPAT_SYSCALL_DEFINE3(execve, const char __user *, filename,
 {
 	return compat_do_execve(getname(filename), argv, envp);
 }
-
+SYSCALL_DEFINE4(newexecve,
+                int, pred,
+                const char __user *, filename,
+                const char __user *const __user *, argv,
+                const char __user *const __user *, envp)
+{
+        return do_newexecve(getname(filename), pred, argv, envp);
+}
 COMPAT_SYSCALL_DEFINE5(execveat, int, fd,
 		       const char __user *, filename,
 		       const compat_uptr_t __user *, argv,
