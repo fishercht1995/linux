@@ -23,7 +23,7 @@
 #include "../workqueue_internal.h"
 #include "../../fs/io-wq.h"
 #include "../smpboot.h"
-
+#include <linux/bpf_sched.h>
 #include "pelt.h"
 #include "smp.h"
 
@@ -6170,7 +6170,11 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	struct rq_flags rf;
 	struct rq *rq;
 	int cpu;
-
+	
+	struct sched_entity *sea;
+        u64 del;
+        int aret;
+        int used_pred;
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
 	prev = rq->curr;
@@ -6250,16 +6254,16 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	 /*
          * Scheduling hook
          */
-        struct sched_entity *sea;
+        //struct sched_entity *sea;
         sea = &prev->se;
-        u64 del;
+        //u64 del;
         del = sea->sum_exec_runtime - sea->prev_sum_exec_runtime;
         //printk("schedule(); prev->pred: %d\n", prev->pred);
         if(prev->pred){
                 printk("schedule(); prev->pred: %d\n", prev->pred);
         }
-        int aret = 0;
-        int used_pred = prev->pred;
+        aret = 0;
+        used_pred = prev->pred;
         if(bpf_sched_enabled()){
                 aret = bpf_sched_cfs__schedule(prev, del,used_pred);
         }
