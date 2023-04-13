@@ -531,6 +531,11 @@ static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
 static inline bool entity_before(struct sched_entity *a,
 				struct sched_entity *b)
 {
+	struct task_struct *taska = container_of(a, struct task_struct, se);
+	struct task_struct *taskb = container_of(b, struct task_struct, se);
+	if(bpf_sched_enabled()){
+                return cfs_entity_before(a->pred, b->pred, a->vruntime, b->vruntime);
+        }
 	return (s64)(a->vruntime - b->vruntime) < 0;
 }
 
