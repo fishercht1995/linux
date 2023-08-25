@@ -534,9 +534,9 @@ static inline bool entity_before(struct sched_entity *a,
 	struct task_struct *taska = container_of(a, struct task_struct, se);
 	struct task_struct *taskb = container_of(b, struct task_struct, se);
 	if(bpf_sched_enabled()){
-                return cfs_entity_before(a->pred, b->pred, a->vruntime, b->vruntime);
+                return cfs_entity_before(taska->pred, taskb->pred, taska->vruntime, taskb->vruntime);
         }
-	return (s64)(a->vruntime - b->vruntime) < 0;
+	return (s64)(taska->vruntime - taskb->vruntime) < 0;
 }
 
 #define __node_2_se(node) \
