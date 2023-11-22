@@ -533,9 +533,25 @@ static inline bool entity_before(struct sched_entity *a,
 {
 	struct task_struct *taska = container_of(a, struct task_struct, se);
 	struct task_struct *taskb = container_of(b, struct task_struct, se);
-	if(bpf_sched_enabled()){
-                return bpf_sched_cfs_entity_before(taska->pred, taskb->pred, a->vruntime, b->vruntime);
+	int apred;
+        int bpred;
+        if(!taska->pred){
+                apred = 0;
+        }else{
+                apred = taska->pred;
         }
+        if(!taskb->pred){
+                bpred = 0;
+        }else{
+                bpred = taskb->pred;
+        }
+        //printk("entity_before(); preds: %d %d\n", taska->pred, taskb->pred);
+        if(bpf_sched_enabled()){
+                return bpf_sched_cfs_entity_before(apred, bpred, a->vruntime, b->vruntime);
+        }
+        //if(bpf_sched_enabled()){
+        //        return bpf_sched_cfs_entity_before(taska->pred, taskb->pred, a->vruntime, b->vruntime);
+        //}
         return (s64)(a->vruntime - b->vruntime) < 0;
 }
 
